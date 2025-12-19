@@ -1,0 +1,156 @@
+parameters:
+- name: Environment
+  displayName: Select Environment
+  type: string
+  default: Dev 
+  values: 
+  - QA
+  - Dev
+  - Prod
+
+
+trigger: none
+      
+variables:
+ envFolder: ${{ parameters.Environment}}
+ tfstate: ${{ lower(parameters.Environment)}}.terraform.tfstate
+
+pool: Mahadev
+
+stages:
+  - stage: PreCommit
+    displayName: Pre-commit/ Static Analysis Stages
+    jobs:
+    - job: terraformValidate
+      displayName: Terraform Init Validate
+      steps:
+        
+      - task: TerraformInstaller@1
+        displayName: instal terraform
+        inputs:
+          terraformVersion: 'latest'
+      
+      - task: TerraformTask@5
+        displayName: Terraform init
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+          backendServiceArm: 'todo-cc'
+          backendAzureRmOverrideSubscriptionID: 'de1c1815-4f90-412b-9551-d55f0de9407d'
+          backendAzureRmStorageAccountName: 'ss145'
+          backendAzureRmContainerName: 'ss-infra'
+          backendAzureRmKey: ${{ variables.tfstate}}
+
+      - task: TerraformTask@5
+        displayName: Terraform Validate
+        inputs:
+          provider: 'azurerm'
+          command: 'validate'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+
+    - job: terraformFmt
+      dependsOn: terraformValidate
+      displayName: Terraform Fmt
+      steps:
+      - task: TerraformTask@5
+        displayName: Terraform fmt
+        inputs:
+          provider: 'azurerm'
+          command: 'custom'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+          outputTo: 'console'
+          customCommand: 'fmt'
+          environmentServiceNameAzureRM: 'todo-cc'
+
+    - job: tfsec
+      dependsOn: terraformFmt
+      displayName: Tfsec Scan
+      steps:
+        - task: tfsec@1
+          continueOnError: true
+          inputs:
+            version: 'v1.26.0'
+            dir: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+
+    - job: tflint
+      dependsOn: tfsec
+      displayName: Tflint Scan
+      steps:
+        - task: PowerShell@2
+          continueOnError: true
+          inputs:
+          
+            targetType: 'inline'
+            script: |
+              
+                
+                
+                winget install TerraformLinters.tflint --silent
+          
+                echo "📌 TFLint Version:"
+                tflint --version
+          
+                echo "📌 Initializing TFLint..."
+                tflint --init
+          
+                echo "📌 Running TFLint Scan..."
+                tflint
+                ls
+      
+            
+            errorActionPreference: 'continue'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+
+
+
+
+  - stage: Plan
+    displayName: Plan and Review stage
+    jobs:
+      - job: terraformPlan
+        displayName: Terraform Plan
+        steps:
+          - task: TerraformInstaller@1
+            displayName: instal terraform
+            inputs:
+              terraformVersion: 'latest'
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+              backendServiceArm: 'todo-cc'
+              backendAzureRmOverrideSubscriptionID: 'de1c1815-4f90-412b-9551-d55f0de9407d'
+              backendAzureRmStorageAccountName: 'ss145'
+              backendAzureRmContainerName: 'ss-infra'
+              backendAzureRmKey: ${{ variables.tfstate}}
+
+          - task: TerraformTask@5
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/infracode/Environment/${{ variables.envFolder}}'
+              environmentServiceNameAzureRM: 'todo-cc'
+
+  - stage: Approval
+    dependsOn: Plan
+    displayName: Approval and Goverance Stage
+    jobs:
+      - job: ManualApproval
+        displayName: Manual Approval
+        pool: server
+        steps: 
+        - task: ManualValidation@1
+          inputs:
+            notifyUsers: 'sahil.a.gupta145@gmail.com'
+    
+
+     
+      
+
+    
+                  
+  
+
+
